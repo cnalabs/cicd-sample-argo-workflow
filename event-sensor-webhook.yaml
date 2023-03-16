@@ -1,0 +1,98 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: sample-eventsensor
+  namespace: argo
+spec:
+  template:
+    serviceAccountName: argo-workflow
+  dependencies:
+    - name: webhook
+      eventSourceName: sample-eventsource
+      eventName: trigger
+  triggers:
+    - template:
+        name: argo-ci-trigger
+        argoWorkflow:
+          group: argoproj.io
+          version: v1alpha1
+          resource: workflows
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: argo-ci-
+                namespace: argo
+              spec:
+                serviceAccountName: argo-workflow
+                entrypoint: argo-ci
+                volumes:
+                  - name: github-access
+                    secret:
+                      secretName: github-access
+                arguments:
+                  parameters:
+                    - name: author
+                      value: <author>
+                    - name: email
+                      value: <email>
+                templates:
+                  - name: argo-ci
+                    steps:
+                      - - name: SourceCheckout
+                          templateRef:
+                            name: sample-workflow-template
+                            template: checkout
+                          arguments:
+                            parameters:
+                            - name: repo
+                              value: https://github.com/cnalabs/cicd-sample-helm.git
+                            - name: revision
+                              value: main
+
+                      - - name: HelmBake
+                          templateRef:
+                            name: sample-workflow-template
+                            template: helm-bake
+                          arguments:
+                            artifacts:
+                            - name: source
+                              from: "{{steps.SourceCheckout.outputs.artifacts.source}}"
+
+                      - - name: HelmDeploy
+                          templateRef:
+                            name: sample-workflow-template
+                            template: helm-deploy
+                          arguments:
+                            artifacts:
+                            - name: source
+                              from: "{{steps.SourceCheckout.outputs.artifacts.source}}"
+
+                      - - name: HelmWait
+                          templateRef:
+                            name: sample-workflow-template
+                            template: helm-wait
+                          arguments:
+                            artifacts:
+                            - name: source
+                              from: "{{steps.SourceCheckout.outputs.artifacts.source}}"
+
+                      - - name: HelmDestroy
+                          templateRef:
+                            name: sample-workflow-template
+                            template: helm-destroy
+                          arguments:
+                            artifacts:
+                            - name: source
+                              from: "{{steps.SourceCheckout.outputs.artifacts.source}}"
+          parameters:
+            - src:
+                dependencyName: webhook
+                dataKey: body.pusher.name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: webhook
+                dataKey: body.pusher.email
+              dest: spec.arguments.parameters.1.value

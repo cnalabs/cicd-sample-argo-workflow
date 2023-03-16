@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: github-sample-event
+  namespace: default
+spec:
+  service:
+    ports:
+      - name: sample-event
+        port: 12000
+        targetPort: 12000
+  github:
+    sample-event:
+      id: 0
+      webhook:
+        endpoint: /push
+        method: POST
+        port: '12000'
+        url: >-
+          http://github-sample-event-eventsource-svc.default.svc:12000
+      owner: ''
+      repository: ''
+      events:
+        - push
+      apiToken:
+        name: github-access
+        key: token
+      insecure: true
+      active: true
+      contentType: json
+      repositories:
+        - owner: cnalabs
+          names:
+            - sample-app

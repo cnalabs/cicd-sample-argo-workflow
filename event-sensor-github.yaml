@@ -1,0 +1,123 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: github-sample-sensor
+  namespace: default
+spec:
+  template:
+    serviceAccountName: argo-workflow
+  dependencies:
+    - name: github
+      eventSourceName: github-sample-event
+      eventName: sample-event
+  triggers:
+    - template:
+        name: argo-ci-trigger
+        argoWorkflow:
+          group: argoproj.io
+          version: v1alpha1
+          resource: workflows
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: argo-ci-
+                namespace: default
+              spec:
+                serviceAccountName: argo-workflow
+                entrypoint: argo-ci
+#                onExit: exit-handler
+                volumes:
+                  - name: github-access
+                    secret:
+                      secretName: github-access
+                arguments:
+                  parameters:
+                    - name: author
+                      value: <author>
+                    - name: email
+                      value: <email>
+                    - name: cache-dependencies
+                      value: /.m2
+                templates:
+                  - name: argo-ci
+                    steps:
+                      - - name: Source-Checkout
+                          templateRef:
+                            name: ci-workflow
+                            template: git-checkout
+                          arguments:
+                            parameters:
+                            - name: repo
+                              value: https://github.com/cnalabs/sample-app.git
+                            - name: revision
+                              value: main
+
+                      - - name: Code-Coverage
+                          templateRef:
+                            name: ci-workflow
+                            template: app-test
+                          arguments:
+                            artifacts:
+                            - name: source
+                              from: "{{steps.Source-Checkout.outputs.artifacts.source}}"
+                            parameters:
+                            - name: cache-dependencies
+                              value: "{{workflow.parameters.cache-dependencies}}"
+
+                      - - name: Build
+                          templateRef:
+                            name: ci-workflow
+                            template: app-build
+                          arguments:
+                            artifacts:
+                            - name: source
+                              from: "{{steps.Source-Checkout.outputs.artifacts.source}}"
+                            - name: cache-dependencies
+                              from: "{{steps.Code-Coverage.outputs.artifacts.cache-dependencies}}"
+                            parameters:
+                            - name: cache-dependencies
+                              value: "{{workflow.parameters.cache-dependencies}}"
+
+                      - - name: Docker-Build-Push
+                          templateRef:
+                            name: ci-workflow
+                            template: docker-build-push
+                          arguments:
+                            artifacts:
+                            - name: source
+                              from: "{{steps.Build.outputs.artifacts.source}}"
+                            parameters:
+                              - name: imageUrl
+                                value: 348951190761.dkr.ecr.ap-northeast-2.amazonaws.com/sample-app
+                              - name: imageTag
+                                value: "{{steps.Source-Checkout.outputs.parameters.tag}}"
+                              - name: pathToContext
+                                value: "."
+                      - - name: Helm-Chart-Update
+                          templateRef:
+                            name: ci-workflow
+                            template: helm-chart-update
+                          arguments:
+                            parameters:
+                              - name: repo
+                                value: https://github.com/cnalabs/sample-helm-chart.git
+                              - name: revision
+                                value: main
+                              - name: imageTag
+                                value: "{{steps.Source-Checkout.outputs.parameters.tag}}"
+                              - name: author
+                                value: "{{workflow.parameters.author}}"
+                              - name: email
+                                value: "{{workflow.parameters.email}}"
+          parameters:
+            - src:
+                dependencyName: github
+                dataKey: body.pusher.name
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: github
+                dataKey: body.pusher.email
+              dest: spec.arguments.parameters.1.value
